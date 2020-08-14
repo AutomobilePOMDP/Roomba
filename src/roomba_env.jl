@@ -182,11 +182,10 @@ RoombaPOMDP(;sensor=Bumper(), mdp=RoombaMDP()) = RoombaPOMDP(sensor,mdp)
 wall_contact(e::RoombaModel, state) = wall_contact(mdp(e).room, state[1:2])
 
 POMDPs.actions(m::RoombaModel) = mdp(m).aspace
-POMDPs.n_actions(m::RoombaModel) = length(mdp(m).aspace)
 
 # maps a RoombaAct to an index in a RoombaModel with discrete actions
 function POMDPs.actionindex(m::RoombaModel, a::RoombaAct)
-    if mdp(m)._amap != nothing
+    if mdp(m)._amap !== nothing
         return mdp(m)._amap[a]
     else
         error("Action index not defined for continuous actions.")
@@ -280,20 +279,6 @@ function POMDPs.states(m::RoombaModel)
     end
 end
 
-# return the number of states in a DiscreteRoombaStateSpace
-function POMDPs.n_states(m::RoombaModel)
-    if mdp(m).sspace isa DiscreteRoombaStateSpace
-        ss = mdp(m).sspace
-        nstates = prod((convert(Int, diff(ss.XLIMS)[1]/ss.x_step)+1, 
-                            convert(Int, diff(ss.YLIMS)[1]/ss.y_step)+1,
-                            round(Int, 2*pi/ss.th_step)+1,
-                            3))
-        return nstates
-    else
-        error("State-space must be DiscreteRoombaStateSpace.")
-    end
-end
-
 # map a RoombaState to an index in a DiscreteRoombaStateSpace
 function POMDPs.stateindex(m::RoombaModel, s::RoombaState)
     if mdp(m).sspace isa DiscreteRoombaStateSpace
@@ -370,7 +355,6 @@ function POMDPs.observation(m::BumperPOMDP,
     return Deterministic(wall_contact(m, sp)) # in {0.0,1.0}
 end
 
-POMDPs.n_observations(m::BumperPOMDP) = 2
 POMDPs.observations(m::BumperPOMDP) = [false, true]
 
 # Lidar POMDP observation
@@ -387,10 +371,6 @@ function POMDPs.observation(m::LidarPOMDP,
 
     # disallow negative measurements
     return Truncated(Normal(rl, sigma), 0.0, Inf)
-end
-
-function POMDPs.n_observations(m::LidarPOMDP)
-    error("n_observations not defined for continuous observations.")
 end
 
 function POMDPs.observations(m::LidarPOMDP)
@@ -413,8 +393,7 @@ function POMDPs.observation(m::DiscreteLidarPOMDP,
     return SparseCat(1:length(d_disc), d_disc)
 end
 
-POMDPs.n_observations(m::DiscreteLidarPOMDP) = length(m.sensor.disc_points) + 1
-POMDPs.observations(m::DiscreteLidarPOMDP) = vec(1:n_observations(m))
+POMDPs.observations(m::DiscreteLidarPOMDP) = vec(1:(length(m.sensor.disc_points)+1))
                         
 # define discount factor
 POMDPs.discount(m::RoombaModel) = 0.95

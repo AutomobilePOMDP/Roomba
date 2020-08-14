@@ -3,13 +3,13 @@
 
 function ParticleFilters.predict!(pm, m::RoombaPOMDP, b::ParticleCollection, a, rng)
     for i in 1:n_particles(b)
-        pm[i] = isterminal(m, b.particles[i]) ? initialstate(m, rng) : gen(DDNOut(:sp), m, b.particles[i], a, rng)
+        pm[i] = isterminal(m, b.particles[i]) ? initialstate(m, rng) : @gen(:sp)(m, b.particles[i], a, rng)
     end 
 end
 
 function ParticleFilters.reweight!(wm, m::RoombaPOMDP, b::ParticleCollection, a, pm, o)
     for i in 1:n_particles(b)
-        wm[i] = isterminal(m, pm[i]) ? 0 : obs_weight(m, a, pm[i], o)
+        wm[i] = isterminal(m, pm[i]) ? 0 : obs_weight(m, rand(b.particles), a, pm[i], o)
     end
 end
 

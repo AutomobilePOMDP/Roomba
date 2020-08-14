@@ -78,3 +78,40 @@ belief_updater = BasicParticleFilter(pomdp, resampler, num_particles)
 ## Adding additional packages or running files from terminal
 If you would like to add additional packages or run files from terminal, please follow the procedure below.
 In julia, first enter the package manager by hitting the ```]``` key. Then activate the AA228FinalProject environment by following the instructions in the Installation section. Packages you now add will be added to the AA228FinalProject environment, and if you exit the package manager (by pressing backspace), the code you run while the environment is activated will have access to all packages specified in the ```Project.toml``` file.
+
+## Parameters
+The parameters of Roomba are listed as follows.
+```julia
+maximum velocity of Roomba [m/s]
+v_max::Float64  = 10.0  # m/s
+
+maximum turn-rate of Roombda [rad/s]
+om_max::Float64 = 1.0   # rad/s
+
+simulation time-step [s]
+dt::Float64     = 0.5   # s
+
+penalty for wall-contact
+contact_pen::Float64 = -1.0 
+
+penalty per time-step
+time_pen::Float64 = -0.1
+
+reward for reaching goal
+goal_reward::Float64 = 10
+
+penalty for reaching stairs
+stairs_penalty::Float64 = -10
+
+specifies room configuration (location of stairs/goal) {1,2,3}
+config::Int = 1
+
+environment room struct
+room::Room  = Room(sspace,configuration=config)
+
+environment state-space (ContinuousRoombaStateSpace or DiscreteRoombaStateSpace)
+sspace::SS = ContinuousRoombaStateSpace()
+
+environment action-space struct
+aspace::AS = RoombaActions()
+```
