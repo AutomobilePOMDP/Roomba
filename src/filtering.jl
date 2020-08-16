@@ -77,6 +77,7 @@ function ParticleFilters.resample(r::LidarResampler, b::WeightedParticleBelief{R
     particles = RoombaState[]
     for i in 1:r.n
         state = rand(rng, b)
+        @assert in_room(r.room, SVector(state.x, state.y))
 
         # add noise to position without changing wall_contact
         temp = [Inf, Inf]
