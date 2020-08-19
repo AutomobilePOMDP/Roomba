@@ -9,7 +9,7 @@ end
 
 function ParticleFilters.reweight!(wm, m::RoombaPOMDP, b::ParticleCollection, a, pm, o)
     for i in 1:n_particles(b)
-        wm[i] = isterminal(m, pm[i]) ? 0 : obs_weight(m, rand(b.particles), a, pm[i], o)
+        wm[i] = isterminal(m, pm[i]) ? 0 : obs_weight(m, pm[1], a, pm[i], o) #pm[1] can be anything
     end
 end
 
@@ -77,7 +77,6 @@ function ParticleFilters.resample(r::LidarResampler, b::WeightedParticleBelief{R
     particles = RoombaState[]
     for i in 1:r.n
         state = rand(rng, b)
-        @assert in_room(r.room, SVector(state.x, state.y))
 
         # add noise to position without changing wall_contact
         temp = [Inf, Inf]
