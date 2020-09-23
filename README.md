@@ -3,32 +3,9 @@ An example video showing the robot first localizing itself using its bump sensor
 <img src="demo.gif" width="450">
 
 ## Installation
-Clone this repository using
 ```
-git clone https://github.com/AutomobilePOMDP/Roomba
+add https://github.com/AutomobilePOMDP/Roomba
 ```
-and `cd` into it.
-
-Then, run the following commands in Julia:
-```julia
-import POMDPs
-POMDPs.add_registry()
-```
-
-Enter the package manager by hitting the ```]``` key. Then activate the AA228FinalProject environment with the command:
-```
-activate .
-```
-Once activated, your prompt should become:
-```
-(AA228FinalProject) pkg> 
-```
-Now run the following command to install all the necessary dependencies:
-```
-instantiate
-```
-Note: if you're running Windows and have trouble building the POMDPSolve and SARSOP dependencies, don't worry. It shouldn't interfere with you being able to get started. We're looking into whether the build issues can be resolved. 
-
 
 ## Getting Started
 Run the ```lidar_roomba.ipynb``` jupyter notebook to become familiar with the Roomba environment. This will walk you through a step-by-step example of how to set up the environment, define a baseline policy, and evaluate the performance of the policy.
