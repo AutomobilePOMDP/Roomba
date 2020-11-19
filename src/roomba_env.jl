@@ -64,7 +64,7 @@ Define the Roomba MDP.
     v_max::Float64  = 10.0  # m/s
     om_max::Float64 = 1.0   # rad/s
     dt::Float64     = 0.5   # s
-    contact_pen::Float64 = -1.0 
+    contact_pen::Float64 = -1.0
     time_pen::Float64 = -0.1
     goal_reward::Float64 = 10
     stairs_penalty::Float64 = -10
@@ -88,11 +88,11 @@ Specify a DiscreteRoombaStateSpace
 
 """
 struct DiscreteRoombaStateSpace
-    x_step::Float64
+    x_step::Float64 #generate a discrete x every x_steps
     y_step::Float64
     th_step::Float64
-    XLIMS::Vector
-    YLIMS::Vector
+    XLIMS::Vector # hard coded in Generating function
+    YLIMS::Vector # hard coded in Generating function
 end
 
 # function to construct DiscreteRoombaStateSpace:
@@ -104,7 +104,7 @@ function DiscreteRoombaStateSpace(num_x_pts::Int, num_y_pts::Int, num_theta_pts:
     # hardcoded room-limits
     # watch for consistency with env_room
     XLIMS = [-30.0, 20.0]
-    YLIMS = [-30.0, 20.0] 
+    YLIMS = [-30.0, 20.0]
 
     x_step = (XLIMS[2]-XLIMS[1])/(num_x_pts-1)
     y_step = (YLIMS[2]-YLIMS[1])/(num_y_pts-1)
@@ -140,7 +140,7 @@ struct Bumper end
 POMDPs.obstype(::Type{Bumper}) = Bool
 POMDPs.obstype(::Bumper) = Bool
 
-struct Lidar 
+struct Lidar
     ray_stdev::Float64 # measurement noise: see POMDPs.observation definition
                        # below for usage
 end
@@ -179,7 +179,7 @@ end
 RoombaPOMDP(;sensor=Bumper(), mdp=RoombaMDP()) = RoombaPOMDP(sensor,mdp)
 
 # function to determine if there is contact with a wall
-wall_contact(e::RoombaModel, state) = wall_contact(mdp(e).room, state[1:2])
+#wall_contact(e::RoombaModel, state) = wall_contact(mdp(e).room, state[1:2])
 
 POMDPs.actions(m::RoombaModel) = mdp(m).aspace
 
@@ -194,15 +194,10 @@ end
 
 # function to get goal xy location for heuristic controllers
 function get_goal_xy(m::RoombaModel)
-    grn = mdp(m).room.goal_rect
-    gwn = mdp(m).room.goal_wall
-    gr = mdp(m).room.rectangles[grn]
-    corners = gr.corners
-    if gwn == 4
-        return (corners[1,:] + corners[4,:]) / 2.
-    else
-        return (corners[gwn,:] + corners[gwn+1,:]) / 2.
-    end
+	p1 = mdp(m).room.goal_segment.p1
+	p2 = mdp(m).room.goal_segment.p2
+    return (p1 + p2) / 2.
+
 end
 
 # initializes x,y,th of Roomba in the room
@@ -218,7 +213,7 @@ function POMDPs.initialstate(m::RoombaModel, rng::AbstractRNG)
         is = index_to_state(m, isi)
     end
 
-    return is 
+    return is
 end
 
 # transition Roomba state given curent state and action
@@ -242,26 +237,23 @@ function POMDPs.transition(m::RoombaModel,
     p0 = SVector(x, y)
     heading = SVector(cos(next_th), sin(next_th))
     des_step = v*dt
-    next_x, next_y = legal_translate(e.room, p0, heading, des_step)
+    p1 = legal_translate(e.room, p0, heading, des_step)
 
     # Determine whether goal state or stairs have been reached
-    grn = mdp(m).room.goal_rect
-    gwn = mdp(m).room.goal_wall
-    srn = mdp(m).room.stair_rect
-    swn = mdp(m).room.stair_wall
-    gr = mdp(m).room.rectangles[grn]
-    sr = mdp(m).room.rectangles[srn]
-    next_status = 1.0*contact_wall(gr, gwn, [next_x, next_y]) - 1.0*contact_wall(sr, swn, [next_x, next_y])
-
+    next_status = 1.0*segment_contact(e.room.goal_segment,p1) - 1.0*segment_contact(e.room.stair_segment,p1)
     # define next state
-    sp = RoombaState(next_x, next_y, next_th, next_status)
+
+    sp = RoombaState(p1[1],p1[2], next_th, next_status)
+#    if next_status != 0
+#	    @show Int(next_status)
+#		@show p1
+#    end
 
     if mdp(m).sspace isa DiscreteRoombaStateSpace
         # round the states to nearest grid point
         si = stateindex(m, sp)
         sp = index_to_state(m, si)
     end
-
     return Deterministic(sp)
 end
 
@@ -288,7 +280,7 @@ function POMDPs.stateindex(m::RoombaModel, s::RoombaState)
         thind = floor(Int, (s[3] - (-pi)) / ss.th_step + 0.5) + 1
         stind = convert(Int, s[4] + 2)
 
-        lin = LinearIndices((convert(Int, diff(ss.XLIMS)[1]/ss.x_step)+1, 
+        lin = LinearIndices((convert(Int, diff(ss.XLIMS)[1]/ss.x_step)+1,
                             convert(Int, diff(ss.YLIMS)[1]/ss.y_step)+1,
                             round(Int, 2*pi/ss.th_step)+1,
                             3))
@@ -302,7 +294,7 @@ end
 function index_to_state(m::RoombaModel, si::Int)
     if mdp(m).sspace isa DiscreteRoombaStateSpace
         ss = mdp(m).sspace
-        lin = CartesianIndices((convert(Int, diff(ss.XLIMS)[1]/ss.x_step)+1, 
+        lin = CartesianIndices((convert(Int, diff(ss.XLIMS)[1]/ss.x_step)+1,
                             convert(Int, diff(ss.YLIMS)[1]/ss.y_step)+1,
                             round(Int, 2*pi/ss.th_step)+1,
                             3))
@@ -324,16 +316,17 @@ end
 
 # defines reward function R(s,a,s')
 function POMDPs.reward(m::RoombaModel,
-                s::AbstractVector{Float64}, 
+                s::AbstractVector{Float64},
                 a::AbstractVector{Float64},
                 sp::AbstractVector{Float64})
-    
+
     # penalty for each timestep elapsed
     cum_reward = mdp(m).time_pen
 
     # penalty for bumping into wall (not incurred for consecutive contacts)
-    previous_wall_contact = wall_contact(m,s)
-    current_wall_contact = wall_contact(m,sp)
+	#why it is mdp(m).room
+    previous_wall_contact = room_contact(mdp(m).room,s[1:2])
+    current_wall_contact = room_contact(mdp(m).room,sp)
     if(!previous_wall_contact && current_wall_contact)
         cum_reward += mdp(m).contact_pen
     end
@@ -342,30 +335,29 @@ function POMDPs.reward(m::RoombaModel,
     cum_reward += mdp(m).goal_reward*(sp.status == 1.0)
     cum_reward += mdp(m).stairs_penalty*(sp.status == -1.0)
 
-    return cum_reward  
+    return cum_reward
 end
 
 # determine if a terminal state has been reached
 POMDPs.isterminal(m::RoombaModel, s::AbstractVector{Float64}) = abs(s.status) > 0.0
 
 # Bumper POMDP observation
-function POMDPs.observation(m::BumperPOMDP, 
+function POMDPs.observation(m::BumperPOMDP,
                             a::AbstractVector{Float64},
                             sp::AbstractVector{Float64})
-    return Deterministic(wall_contact(m, sp)) # in {0.0,1.0}
+    return Deterministic(room_contact(mdp(m).room, sp)) # in {0.0,1.0}
 end
 
 POMDPs.observations(m::BumperPOMDP) = [false, true]
 
 # Lidar POMDP observation
-function POMDPs.observation(m::LidarPOMDP, 
+function POMDPs.observation(m::LidarPOMDP,
                             a::AbstractVector{Float64},
                             sp::AbstractVector{Float64})
     x, y, th = sp
 
     # determine uncorrupted observation
-    rl = ray_length(mdp(m).room, [x, y], [cos(th), sin(th)])
-
+	rl = minimum(ray_length(seg, [x, y], [cos(th), sin(th)]) for seg in mdp(m).room.segments)
     # compute observation noise
     sigma = m.sensor.ray_stdev * max(rl, 0.01)
 
@@ -378,10 +370,10 @@ function POMDPs.observations(m::LidarPOMDP)
 end
 
 # DiscreteLidar POMDP observation
-function POMDPs.observation(m::DiscreteLidarPOMDP, 
+function POMDPs.observation(m::DiscreteLidarPOMDP,
                             a::AbstractVector{Float64},
                             sp::AbstractVector{Float64})
-    
+
     m_lidar = LidarPOMDP(Lidar(m.sensor.ray_stdev), mdp(m))
 
     d = observation(m_lidar, a, sp)
@@ -394,9 +386,9 @@ function POMDPs.observation(m::DiscreteLidarPOMDP,
 end
 
 POMDPs.observations(m::DiscreteLidarPOMDP) = vec(1:(length(m.sensor.disc_points)+1))
-                        
+
 # define discount factor
-POMDPs.discount(m::RoombaModel) = 0.95
+POMDPs.discount(m::RoombaModel) = 0.99
 
 # struct to define an initial distribution over Roomba states
 struct RoombaInitialDistribution{M<:RoombaModel}
