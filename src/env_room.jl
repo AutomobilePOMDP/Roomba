@@ -1,169 +1,16 @@
-# Code to define the environment room and rectangles used to define it
-# maintained by {jmorton2,kmenda}@stanford.edu
-
+# A L-shape room with 6 walls
 # Define constants  -- all units in m
-RW = 5. # room width
+ # countrl the room width; the width of the corridor is twice as much
+#as ROOM_W; should be in (0,25)
 mutable struct ROBOT_W_struct
     val::Float64 # robot width
 end
 DEFAULT_ROBOT_W = 1.0
+DEFAULT_R = DEFAULT_ROBOT_W / 2.
 ROBOT_W = ROBOT_W_struct(DEFAULT_ROBOT_W)
-MARGIN = 1e-12
+MARGIN = 1e-9
+SQRT_2 = 1.4142
 
-# Define rectangle type for constructing hallway
-# corners: 4x2 np array specifying
-#		   bottom-left, top-left,
-#		   top-right, bottom-right corner
-# walls: length 4 list of bools specifying
-#		 if left, top, right, bottom sides are
-#		 open (False) or walls (True)
-mutable struct Rectangle
-    corners::Array{Float64, 2}
-    walls::Array{Bool, 1}
-    segments::Array{LineSegment, 1}
-    width::Float64
-    height::Float64
-    midpoint::Array{Float64, 1}
-    area::Float64
-    xl::Float64
-    xu::Float64
-    yl::Float64
-    yu::Float64
-
-    function Rectangle(
-        corners::Array{Float64, 2},
-        walls::Array{Bool, 1};
-        goal_idx::Int=0,
-        stair_idx::Int=0
-        )
-
-        retval = new()
-
-        retval.corners = corners
-        retval.walls = walls
-
-        retval.width = corners[3, 1] - corners[2, 1]
-        retval.height = corners[2, 2] - corners[1, 2]
-        mean_vals = mean(corners, dims=1)
-        retval.midpoint = SVector(mean_vals[1, 1], mean_vals[1, 2])
-        
-        # compute area in which robot could be initialized
-        retval.xl = corners[2, 1]
-        retval.xu = corners[3, 1]
-        retval.yl = corners[1, 2]
-        retval.yu = corners[2, 2]
-        if walls[1]
-            retval.width -= ROBOT_W.val/2
-            retval.xl += ROBOT_W.val/2
-        end
-        if walls[2]
-            retval.height -= ROBOT_W.val/2
-            retval.yu -= ROBOT_W.val/2
-        end
-        if walls[3]
-            retval.width -= ROBOT_W.val/2
-            retval.xu -= ROBOT_W.val/2
-        end
-        if walls[4]
-            retval.height -= ROBOT_W.val/2
-            retval.yl += ROBOT_W.val/2
-        end
-        @assert retval.width > 0.0 && retval.height > 0.0 "Negative width or height"
-        retval.area = retval.width * retval.height
-        
-        retval.segments = [LineSegment(corners[i, :], corners[i+1, :], (goal_idx == i), (stair_idx == i)) for i =1:3 if walls[i]]
-        if walls[4]
-            push!(retval.segments, LineSegment(corners[1, :], corners[4, :], (goal_idx == 4), (stair_idx == 4)))
-        end
-
-        retval
-    end
-end
-
-# Randomly initializes the robot in this rectangle
-function init_pos(rect::Rectangle, rng)
-    w = rect.xu - rect.xl
-    h = rect.yu - rect.yl
-    init_pos = SVector(rand(rng)*w + rect.xl, rand(rng)*h + rect.yl)
-    
-    init_pos
-end
-
-# Determines if pos (center of robot) is within the rectangle
-function in_rectangle(rect::Rectangle, pos::AbstractVector{Float64})
-    corners = rect.corners
-    xlims = SVector(rect.xl - MARGIN, rect.xu + MARGIN)
-    ylims = SVector(rect.yl - MARGIN, rect.yu + MARGIN)
-    if xlims[1] < pos[1] < xlims[2]
-        if ylims[1] < pos[2] < ylims[2]
-            return true
-        end
-    end
-    return false
-end
-
-# determines if pos (center of robot) is intersecting with a wall
-# returns: -2, -Inf if center of robot not in room
-#          -1, -Inf if not in wall contact
-#          0~3, violation mag, indicating which wall has contact
-#          if multiple, returns largest violation
-function wall_contact(rect::Rectangle, pos::AbstractVector{Float64})
-    if !(in_rectangle(rect, pos))
-        return -2, -Inf
-    end
-    corners = rect.corners
-    xlims = SVector(corners[2, 1], corners[3, 1])
-    ylims = SVector(corners[1, 2], corners[2, 2])
-
-    contacts = []
-    contact_mags = []
-    if pos[1] - ROBOT_W.val/2 <= xlims[1] + MARGIN && rect.walls[1]
-        # in contact with left wall
-        push!(contacts, 1)
-        push!(contact_mags, abs(pos[1] - ROBOT_W.val/2 - xlims[1]))
-    end
-    if pos[2] + ROBOT_W.val/2 + MARGIN >= ylims[2] && rect.walls[2]
-        # in contact with top wall
-        push!(contacts, 2)
-        push!(contact_mags, abs(pos[2] + ROBOT_W.val/2 - ylims[2]))
-    end
-    if pos[1] + ROBOT_W.val/2 + MARGIN >= xlims[2] && rect.walls[3]
-        # in contact with right wall
-        push!(contacts, 3)
-        push!(contact_mags, abs(pos[1] + ROBOT_W.val/2 - xlims[2]))
-    end
-    if pos[2] - ROBOT_W.val/2 <= ylims[1] + MARGIN && rect.walls[4]
-        # in contact with bottom wall
-        push!(contacts, 4)
-        push!(contact_mags, abs(pos[2] - ROBOT_W.val/2 - ylims[1]))
-    end
-
-    if length(contacts) == 0
-        return -1, -Inf
-    else
-        return contacts[argmax(contact_mags)], maximum(contact_mags)
-    end
-end
-
-# Find closest distance to any wall
-function furthest_step(rect::Rectangle, pos::AbstractVector{Float64}, heading::AbstractVector{Float64})
-    return minimum(furthest_step(seg, pos, heading, ROBOT_W.val/2) for seg in rect.segments)
-end
-
-# computes the length of a ray from robot center to closest segment 
-# from p0 pointing in direction heading
-function ray_length(rect::Rectangle, pos::AbstractVector{Float64}, heading::AbstractVector{Float64})
-    return minimum(ray_length(seg, pos, heading) for seg in rect.segments)
-end
-
-# Render rectangle based on segments
-function render(rect::Rectangle, ctx::CairoContext)
-    for seg in rect.segments
-        render(seg, ctx)
-    end
-end
-
-# round corners to discretized coordinates if necessary
 function round_corners(sspace, corners)
 
     if sspace isa DiscreteRoombaStateSpace
@@ -175,80 +22,219 @@ function round_corners(sspace, corners)
         end
     end
     return corners
-
-
-
 end
 
-# generate consecutive rectangles that make up the room
-# all rectangles share a full "wall" with an adjacent rectangle
-# shared walls are not solid - just used to specify geometry
 mutable struct Room
-    rectangles::Array{Rectangle, 1}
-    areas::Array{Float64, 1}
-    goal_rect::Int  # Index of rectangle with goal state
-    goal_wall::Int  # Index of wall that leads to goal
-    stair_rect::Int # Index of rectangle with stairs
-    stair_wall::Int # Index of wall that leads to stairs
-
-    function Room(sspace; configuration=1)
-
+    corners::Array{Float64, 2}
+    poscorners::Array{Float64, 2}
+    segments::Array{LineSegment, 1}
+    possegments::Array{LineSegment, 1}
+    goal_wall::Int
+    stair_wall::Int
+    goal_segment::LineSegment  # Index of wall that leads to goal
+    stair_segment::LineSegment # Index of wall that leads to stairs
+    xl::Float64
+    xu::Float64
+    yl::Float64
+    yu::Float64
+    tpoint::Array{Float64, 1}#Turning point
+# ROOM_W:countrl the room width; the width of the corridor is twice as
+# much as ROOM_W; should in (2,10) or cloud have unknown mistakes
+    function Room(sspace; configuration=1,ROOM_W::Float64 = 5.0)
         retval = new()
-
-        # Define different configurations for stair and goal locations
-        goal_idxs = [0, 0, 0, 0]
-        stair_idxs = [0, 0, 0, 0]
-        if configuration == 2
-            retval.goal_rect = 1
-            retval.goal_wall = 4
-            retval.stair_rect = 2
+         # Define different configurations for stair and goal locations
+         # Wall start from the laft and is clockwidth)
+        if configuration > 4
+            configuration = 1
+        end
+        if configuration == 1
+            retval.goal_wall = 3
+            retval.stair_wall = 4
+        elseif configuration == 2
+            retval.goal_wall = 6
             retval.stair_wall = 1
         elseif configuration == 3
-            retval.goal_rect = 4
             retval.goal_wall = 3
-            retval.stair_rect = 2
             retval.stair_wall = 1
-        else
-            retval.goal_rect = 4
-            retval.goal_wall = 3
-            retval.stair_rect = 4
+        else #  configuration == 4
+            retval.goal_wall = 6
             retval.stair_wall = 4
         end
-        goal_idxs[retval.goal_rect] = retval.goal_wall
-        stair_idxs[retval.stair_rect] = retval.stair_wall
-
-        # Initialize array of rectangles
-        rectangles = []
-
-        # Rectangle 1
-        corners = round_corners(sspace,[[-20-RW -20]; [-20-RW 0-RW]; [-20+RW 0-RW]; [-20+RW -20]])
-        walls = [true, false, true, true] # top wall shared
-        push!(rectangles, Rectangle(corners, walls, goal_idx=goal_idxs[1], stair_idx=stair_idxs[1]))
-
-        # Rectangle 2
-        corners = round_corners(sspace,[[-20-RW 0-RW]; [-20-RW 0+RW]; [-20+RW 0+RW]; [-20+RW 0-RW]])
-        walls = [true, true, false, false] # bottom, right wall shared
-        push!(rectangles, Rectangle(corners, walls, goal_idx=goal_idxs[2], stair_idx=stair_idxs[2]))
-
-        # Rectangle 3
-        corners = round_corners(sspace,[[-20+RW 0-RW]; [-20+RW 0+RW]; [10 0+RW]; [10 0-RW]])
-        walls = [false, true, false, true] # left wall shared
-        push!(rectangles, Rectangle(corners, walls, goal_idx=goal_idxs[3], stair_idx=stair_idxs[3]))
-
-        # Rectangle 4
-        corners = round_corners(sspace,[[10 0-RW]; [10 0+RW]; [10+RW 0+RW]; [10+RW 0-RW]])
-        walls = [false, true, true, true] # left wall shared
-        push!(rectangles, Rectangle(corners, walls, goal_idx=goal_idxs[4], stair_idx=stair_idxs[4]))
-
-        retval.rectangles = rectangles
-        retval.areas = [r.area for r in rectangles]
-        
-        retval
+        retval.goal_segment = goal_wall_segment(retval.goal_wall,ROOM_W)
+        retval.stair_segment = goal_wall_segment(retval.stair_wall,ROOM_W)
+        #corners(start from the bottom left and is clockwidth)
+        retval.corners = round_corners(sspace,[[-20-ROOM_W -20]; [-20-ROOM_W 0+ROOM_W];
+        [10+ROOM_W 0+ROOM_W]; [10+ROOM_W 0-ROOM_W];
+        [-20+ROOM_W 0-ROOM_W];[-20+ROOM_W -20]])
+        retval.poscorners = round_corners(sspace,[[-20-ROOM_W+DEFAULT_R -20+DEFAULT_R];
+        [-20-ROOM_W+DEFAULT_R 0+ROOM_W-DEFAULT_R];
+        [10+ROOM_W-DEFAULT_R 0+ROOM_W-DEFAULT_R];
+        [10+ROOM_W-DEFAULT_R 0-ROOM_W+DEFAULT_R];
+        [-20+ROOM_W-DEFAULT_R 0-ROOM_W+DEFAULT_R];
+        [-20+ROOM_W-DEFAULT_R -20+DEFAULT_R]])
+        retval.xl = retval.poscorners[1,1]
+        retval.xu = retval.poscorners[3,1]
+        retval.yl = retval.poscorners[1,2]
+        retval.yu = retval.poscorners[2,2]
+        # a little diffrence in this corner
+        retval.tpoint = SVector(retval.poscorners[5,1],retval.poscorners[5,2])
+        retval.segments = [LineSegment(retval.corners[i, :], retval.corners[i+1, :]) for i =1:5]
+        push!(retval.segments, LineSegment(retval.corners[1, :], retval.corners[6, :]))
+        retval.possegments = [LineSegment(retval.poscorners[i, :], retval.poscorners[i+1, :]) for i =1:5]
+        push!(retval.possegments, LineSegment(retval.poscorners[1, :], retval.poscorners[6, :]))
+        return retval
     end
 end
 
+function init_pos(r::Room, rng)
+    w = r.xu - r.xl
+    h = r.yu - r.yl
+    i=1
+    while i<1000
+        i=i+1
+        init_pos = SVector(rand(rng)*w + r.xl, rand(rng)*h + r.yl)
+        if init_pos[1]<r.tpoint[1]||init_pos[2]>r.tpoint[2]
+            return init_pos
+        end
+    end
+    @assert "can not init position, recheck the room"
+end
+function in_room(r::Room, pos::AbstractVector{Float64})
+    if r.xl-MARGIN< pos[1] < r.xu+MARGIN &&
+        r.yl-MARGIN < pos[2] < r.yu+MARGIN &&
+        (r.tpoint[1]+MARGIN > pos[1]||r.tpoint[2]-MARGIN < pos[2])
+        return true
+    end
+
+    return false
+end
+# for determing
+function room_contact(r::Room,pos::AbstractVector{Float64})
+    #if roomba contact any wall
+    if r.xl > pos[1] - MARGIN
+        return true
+    end
+    if r.xu < pos[1] + MARGIN
+        return true
+    end
+    if r.yl > pos[2] - MARGIN
+        return true
+    end
+    if r.yu < pos[2] + MARGIN
+        return true
+    end
+    if r.tpoint[2] > pos[2] - MARGIN && r.tpoint[1] < pos[1] + MARGIN
+        return true
+    end
+    return false
+end
+# possible contact walls
+# pos1:start point
+# pos2:end point
+function collapse_detect(r::Room, pos1::AbstractVector{Float64},
+    pos2::AbstractVector{Float64})
+    contact_walls = []
+    if r.xl > pos2[1] - MARGIN
+        push!(contact_walls,1)
+    end
+    if r.xu < pos2[1] + MARGIN
+        push!(contact_walls,3)
+    end
+    if r.yl > pos2[2] + MARGIN
+        push!(contact_walls,6)
+    end
+    if r.yu < pos2[2] + MARGIN
+        push!(contact_walls,2)
+    end
+    if r.tpoint[1] < pos2[1] + MARGIN && r.tpoint[2] > pos2[2] - MARGIN
+        if r.tpoint[1] > pos1[1] - MARGIN
+            push!(contact_walls,5)
+        end
+        if r.tpoint[2] < pos1[2] + MARGIN
+            push!(contact_walls,4)
+        end
+    end
+    if (pos1[1] < r.tpoint[1] < pos2[1]&&pos1[2] < r.tpoint[2] < pos2[2])||
+        (pos1[1] > r.tpoint[1] > pos2[1]) && (pos1[2] > r.tpoint[2] > pos2[2])
+        # not every conditions are considerd
+        if pos1[1]<pos2[1]
+            #keep p2<p1
+            temp1=pos1
+            temp2=pos2
+        else
+            temp1=pos2
+            temp2=pos1
+        end
+        #
+        tan_tp1_tp2=(temp2[2]-temp1[2])/(temp2[1]-temp1[1])
+        tan_tp1_tpoint=(r.tpoint[2]-temp1[2])/(r.tpoint[1]-temp1[1])
+        if tan_tp1_tp2 > tan_tp1_tpoint
+            if pos2[1]>pos1[1]
+                push!(contact_walls,5)
+            else
+                push!(contact_walls,4)
+            end
+        end
+    end
+#=
+    if r.tpoint[1] < pos2[1]  && r.xu > pos2[1] # out of L, near by the Turning point
+        if r.tpoint[1] < pos1[1]
+            push!(contact_walls,4)
+        elseif r.tpoint[2] > pos1[2]
+            push!(contact_walls,5)
+        else
+            push!(contact_walls,4)
+            push!(contact_walls,5)
+        end
+    end
+=#
+    return contact_walls
+
+end
+
+# determines if pos (center of robot) is intersecting with a segment;should
+# replaced with calculating the distance between point and LineSegment
+function segment_contact(seg::LineSegment,pos::AbstractVector{Float64})
+    # vertical line
+    if abs(seg.p2[1]-seg.p1[1])<MARGIN
+        if abs(pos[1]-seg.p2[1])<MARGIN+DEFAULT_R&&
+            pos[2]<max(seg.p2[2],seg.p1[2])&&
+            pos[2]>min(seg.p2[2],seg.p1[2])
+            return true
+        end
+        return false
+        # horizonal line
+    elseif abs(pos[2]-seg.p2[2])<MARGIN+DEFAULT_R&&
+        pos[1]<max(seg.p2[1],seg.p1[1])&&
+        pos[1]>min(seg.p2[1],seg.p1[1])
+        return true
+    end
+    return false
+end
+    # pos1:start point
+    # pos2:end point
+function legal_translate(r::Room, pos::AbstractVector{Float64},
+     heading::AbstractVector{Float64}, des_step::Float64)
+     pos1 = pos
+     if des_step == 0
+         return pos1
+     end
+     pos2 = pos1 + des_step*heading
+     contact_walls = collapse_detect(r,pos1,pos2)
+     if length(contact_walls) == 0
+         return pos2
+     end
+    #calculate the shortest distance (which means the first wall roomba meets)
+    length_min=minimum(ray_length(r.possegments[wall_index], pos1, heading) for wall_index in contact_walls)
+#    if length_min > 20 || length_min < -0.1
+#        @show contact_walls,pos1,heading
+#    end
+    length_min=min(des_step,length_min) #might a useless check ?
+    pos2 = pos1 + length_min*heading
+    return pos2
+end
 # Sample from multinomial distribution
-# eventually this should be replaced with categorical
+# eventually th is should be replaced with categorical
 function multinomial_sample(p::AbstractVector{Float64}, rng::AbstractRNG)
     rand_num = rand(rng)
     for i = 1:length(p)
@@ -257,64 +243,11 @@ function multinomial_sample(p::AbstractVector{Float64}, rng::AbstractRNG)
         end
     end
 end
-
-# Initialize the robot randomly in the room
-# Randomly select a rectangle weighted by initializable area
-function init_pos(r::Room, rng::AbstractRNG)
-    norm_areas = r.areas/sum(r.areas)
-    rect = multinomial_sample(norm_areas, rng)
-    return init_pos(r.rectangles[rect], rng)
-end
-
-# Determines if pos is in contact with a wall
-# returns bool indicating contact
-function wall_contact(r::Room, pos::AbstractVector{Float64})
-    for (i, rect) in enumerate(r.rectangles)
-        wc, _ = wall_contact(rect, pos)
-        if wc >= 0
-            return true
-        end
-    end
-    return false
-end
-
-# Determines if pos is in contact with a specific wall
-# returns true if true
-function contact_wall(r::Rectangle, wall::Int, pos::Array{Float64, 1})
-    wc,_ = wall_contact(r, pos)
-    return wc == wall
-end    
-
-# Determines if pos (center of robot) is within the room
-function in_room(r::Room, pos::AbstractVector{Float64})
-    return any([in_rectangle(rect, pos) for rect in r.rectangles])
-end 
-
-# Attempts to translate from pos0 in direction heading for des_step without violating boundaries
-function legal_translate(r::Room, pos0::AbstractVector{Float64}, heading::AbstractVector{Float64}, des_step::Float64)
-    fs = minimum(furthest_step(rect, pos0, heading) for rect in r.rectangles)
-    fs = min(des_step, fs)
-    pos1 = pos0 + fs*heading
-    if !in_room(r, pos1)
-        return pos0
-    else
-        return pos1
-    end
-end
-
-# computes the length of a ray from robot center to closest segment
-# from p0 pointing in direction heading
-# inputs: p0: array specifying initial point
-#         heading: array specifying heading unit vector
-#         R: robot radius [m]
-# outputs: ray_length [m]
-function ray_length(r::Room, pos0::AbstractVector{Float64}, heading::AbstractVector{Float64})
-    return minimum(ray_length(rect, pos0, heading) for rect in r.rectangles)
-end
-
-# Render room based on individual rectangles
+# Render room based on segments
 function render(r::Room, ctx::CairoContext)
-    for rect in r.rectangles
-        render(rect, ctx)
+    for seg in r.segments
+        render(seg, ctx)
     end
+    render(r.goal_segment,ctx,goal=true)
+    render(r.stair_segment,ctx,stair=true)
 end

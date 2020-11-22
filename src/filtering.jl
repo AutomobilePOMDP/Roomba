@@ -4,10 +4,11 @@
 function ParticleFilters.predict!(pm, m::RoombaPOMDP, b::ParticleCollection, a, rng)
     for i in 1:n_particles(b)
         pm[i] = isterminal(m, b.particles[i]) ? initialstate(m, rng) : @gen(:sp)(m, b.particles[i], a, rng)
-    end 
+    end
 end
 
 function ParticleFilters.reweight!(wm, m::RoombaPOMDP, b::ParticleCollection, a, pm, o)
+
     for i in 1:n_particles(b)
         wm[i] = isterminal(m, pm[i]) ? 0 : obs_weight(m, pm[1], a, pm[i], o) #pm[1] can be anything
     end
@@ -33,20 +34,21 @@ function ParticleFilters.resample(r::BumperResampler, b::WeightedParticleBelief{
     particles = RoombaState[]
     for i in 1:r.n
         state = rand(rng, b)
-        contact = wall_contact(r.room, state)
-
+        contact = room_contact(r.room, state)
+        #bug?
         # add noise to position without changing wall_contact
         temp = [state.x, state.y]
         x, y = [temp...]
         temp[1] += (rand(rng) - 0.5) * 2.0 * r.pos_noise_coeff
-        if in_room(r.room, SVector(temp...)) && wall_contact(r.room, SVector(temp...)) == contact
+        if in_room(r.room, SVector(temp...)) && room_contact(r.room, SVector(temp...)) == contact
             x = temp[1]
-        else
-            temp[1] = x
         end
         temp[2] += (rand(rng) - 0.5) * 2.0 * r.pos_noise_coeff
-        if in_room(r.room, SVector(temp...)) && wall_contact(r.room, SVector(temp...)) == contact
+        if in_room(r.room, SVector(temp...)) && room_contact(r.room, SVector(temp...)) == contact
             y = temp[2]
+        end
+        if in_room(r.room, [x,y]) == false
+            @show r.room,[x,y]
         end
 
         # add noise to orientation
