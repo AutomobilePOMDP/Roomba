@@ -200,22 +200,6 @@ function get_goal_xy(m::RoombaModel)
 
 end
 
-# initializes x,y,th of Roomba in the room
-function POMDPs.initialstate(m::RoombaModel, rng::AbstractRNG)
-    e = mdp(m)
-    x, y = init_pos(e.room, rng)
-    th = rand(rng) * 2*pi - pi
-
-    is = RoombaState(x, y, th, 0.0)
-
-    if mdp(m).sspace isa DiscreteRoombaStateSpace
-        isi = stateindex(m, is)
-        is = index_to_state(m, isi)
-    end
-
-    return is
-end
-
 # transition Roomba state given curent state and action
 function POMDPs.transition(m::RoombaModel,
                            s::AbstractVector{Float64},
@@ -396,8 +380,22 @@ struct RoombaInitialDistribution{M<:RoombaModel}
 end
 
 # definition of initialstate and initialstate_distribution for Roomba environment
-POMDPs.rand(rng::AbstractRNG, d::RoombaInitialDistribution) = initialstate(d.m, rng)
-POMDPs.initialstate_distribution(m::RoombaModel) = RoombaInitialDistribution(m)
+POMDPs.initialstate(m::RoombaModel) = RoombaInitialDistribution(m)
+function POMDPs.rand(rng::AbstractRNG, d::RoombaInitialDistribution)
+    e = mdp(d.m)
+    x, y = init_pos(e.room, rng)
+    th = rand(rng) * 2*pi - pi
+
+    is = RoombaState(x, y, th, 0.0)
+
+    if mdp(d.m).sspace isa DiscreteRoombaStateSpace
+        isi = stateindex(d.m, is)
+        is = index_to_state(d.m, isi)
+    end
+
+    return is
+end
+
 
 # Render a room and show robot
 function render(ctx::CairoContext, m::RoombaModel, step)

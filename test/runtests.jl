@@ -6,7 +6,7 @@ using BeliefUpdaters
 using ParticleFilters
 using POMDPSimulators
 using Cairo
-using Gtk
+# using Gtk
 using Random
 using Test
 
@@ -23,6 +23,14 @@ resampler = LidarResampler(num_particles, m, pos_noise_coeff, ori_noise_coeff)
 # resampler = BumperResampler(num_particles, m, pos_noise_coeff, ori_noise_coeff)
 belief_updater = BasicParticleFilter(m, resampler, num_particles)
 
+println("Running test")
+p = Running(m)
+
+for step in stepthrough(m,p,belief_updater, max_steps=100)
+    @show step.a
+end
+
+println("ToEnd test")
 # Define the policy to test
 mutable struct ToEnd <: Policy
     ts::Int64 # to track the current time-step.

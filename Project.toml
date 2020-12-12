@@ -1,7 +1,7 @@
 name = "Roomba"
 uuid = "27451d18-47cd-4e6c-a8d6-4c3b695fab9f"
 repo = "https://github.com/AutomobilePOMDP/Roomba"
-version = "0.1.0"
+version = "0.1.1"
 
 [deps]
 AEMS = "3b430cce-3194-5812-b203-bf9e73c3e836"
