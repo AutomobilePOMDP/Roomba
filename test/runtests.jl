@@ -10,20 +10,35 @@ using Cairo
 using Random
 using Test
 
-sensor = Lidar() # or Bumper() for the bumper version of the environment
-config = 3 # 1,2, or 3
-m = RoombaPOMDP(sensor=sensor, mdp=RoombaMDP(config=config));
+action_space = vec([RoombaAct(v, om) for v in 0:2:10, om in -1.0:0.2:1.0])
 
 num_particles = 2000
 pos_noise_coeff = 0.3
 ori_noise_coeff = 0.1
+
+# Bumper Roomba
+println("Bumper Running test")
+sensor = Bumper()
+m = RoombaPOMDP(sensor=sensor, mdp=RoombaMDP(aspace=action_space));
+p = Running(m)
+resampler = BumperResampler(num_particles, m, pos_noise_coeff, ori_noise_coeff)
+belief_updater = BasicParticleFilter(m, resampler, num_particles)
+
+for step in stepthrough(m,p,belief_updater, max_steps=100)
+    @show step.a
+end
+
+
+sensor = Lidar() # or Bumper() for the bumper version of the environment
+config = 3 # 1,2, or 3
+m = RoombaPOMDP(sensor=sensor, mdp=RoombaMDP(config=config));
 
 resampler = LidarResampler(num_particles, m, pos_noise_coeff, ori_noise_coeff)
 # for the bumper environment
 # resampler = BumperResampler(num_particles, m, pos_noise_coeff, ori_noise_coeff)
 belief_updater = BasicParticleFilter(m, resampler, num_particles)
 
-println("Running test")
+println("Lidar Running test")
 p = Running(m)
 
 for step in stepthrough(m,p,belief_updater, max_steps=100)

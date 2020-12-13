@@ -12,15 +12,15 @@ function POMDPs.action(p::Running, s::RoombaState)
     # apply proportional control to compute the turn-rate
     Kprop = 1.0
     om = Kprop * del_angle
-    # find the closest option in action space
-    if !(typeof(p.m.aspace) <: RoombaActions)
-        _,ind = findmin(abs.(om .- p.m.aspace))
-        om = p.m.aspace[ind]
-    end
     # always travel at some fixed velocity
     v = p.m.v_max
-    
-    return RoombaAct(v, om)
+    # find the closest option in action space
+    if typeof(p.m.aspace) <: RoombaActions
+        return RoombaAct(v, om)
+    else
+        _, ind = findmin([((act.omega-om)/p.m.om_max)^2 + ((act.v-v)/p.m.v_max)^2  for act in p.m.aspace])
+        return p.m.aspace[ind]
+    end
 end
 
 POMDPs.action(p::Running, b::AbstractParticleBelief) = action(p, mode(b))
