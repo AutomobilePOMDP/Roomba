@@ -4,7 +4,7 @@ An example video showing the robot first localizing itself using its bump sensor
 
 ## Installation
 ```
-add https://github.com/AutomobilePOMDP/Roomba
+add https://github.com/LAMDA-POMDP/Roomba
 ```
 
 ## Getting Started

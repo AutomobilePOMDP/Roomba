@@ -1,19 +1,6 @@
 # specification of particle filters for the bumper and lidar Roomba environments
 # maintained by {jmorton2,kmenda}@stanford.edu
 
-function ParticleFilters.predict!(pm, m::RoombaPOMDP, b::ParticleCollection, a, rng)
-    for i in 1:n_particles(b)
-        pm[i] = isterminal(m, b.particles[i]) ? initialstate(m, rng) : @gen(:sp)(m, b.particles[i], a, rng)
-    end
-end
-
-function ParticleFilters.reweight!(wm, m::RoombaPOMDP, b::ParticleCollection, a, pm, o)
-
-    for i in 1:n_particles(b)
-        wm[i] = isterminal(m, pm[i]) ? 0 : obs_weight(m, pm[1], a, pm[i], o) #pm[1] can be anything
-    end
-end
-
 struct BumperResampler
     # number of particles
     n::Int
@@ -34,21 +21,19 @@ function ParticleFilters.resample(r::BumperResampler, b::WeightedParticleBelief{
     particles = RoombaState[]
     for i in 1:r.n
         state = rand(rng, b)
-        contact = room_contact(r.room, state)
-        #bug?
+        x = temp_x = state.x
+        y = temp_y = state.y
+        contact = room_contact(r.room, Pos(x,y))
         # add noise to position without changing wall_contact
-        temp = [state.x, state.y]
-        x, y = [temp...]
-        temp[1] += (rand(rng) - 0.5) * 2.0 * r.pos_noise_coeff
-        if in_room(r.room, SVector(temp...)) && room_contact(r.room, SVector(temp...)) == contact
-            x = temp[1]
+        temp_x += (rand(rng) - 0.5) * 2.0 * r.pos_noise_coeff
+        temp = Pos(temp_x, temp_y)
+        if in_room(r.room, temp) && room_contact(r.room, temp) == contact
+            x = temp_x
         end
-        temp[2] += (rand(rng) - 0.5) * 2.0 * r.pos_noise_coeff
-        if in_room(r.room, SVector(temp...)) && room_contact(r.room, SVector(temp...)) == contact
-            y = temp[2]
-        end
-        if in_room(r.room, [x,y]) == false
-            @show r.room,[x,y]
+        temp_y += (rand(rng) - 0.5) * 2.0 * r.pos_noise_coeff
+        temp = Pos(temp_x, temp_y)
+        if in_room(r.room, temp) && room_contact(r.room, temp) == contact
+            y = temp_y
         end
 
         # add noise to orientation
@@ -81,13 +66,12 @@ function ParticleFilters.resample(r::LidarResampler, b::WeightedParticleBelief{R
         state = rand(rng, b)
 
         # add noise to position without changing wall_contact
-        temp = [Inf, Inf]
-        while !in_room(r.room, SVector(temp...))
-            temp = [state.x, state.y]
-            temp[1] += (rand(rng) - 0.5) * 2.0 * r.pos_noise_coeff
-            temp[2] += (rand(rng) - 0.5) * 2.0 * r.pos_noise_coeff
+        x = Inf
+        y = Inf
+        while !in_room(r.room, Pos(x, y))
+            x = state.x + (rand(rng) - 0.5) * 2.0 * r.pos_noise_coeff
+            y = state.y + (rand(rng) - 0.5) * 2.0 * r.pos_noise_coeff
         end
-        x, y = [temp...]
 
         # add noise to orientation
         theta = state.theta + (rand(rng) - 0.5) * 2.0 * r.ori_noise_coeff

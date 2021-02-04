@@ -130,9 +130,9 @@ Fields:
 - `sensor::T` struct specifying the sensor used (Lidar or Bump)
 - `mdp::T` underlying RoombaMDP
 """
-struct RoombaPOMDP{T, O} <: POMDP{RoombaState, RoombaAct, O}
+struct RoombaPOMDP{SS, AS, T, O} <: POMDP{RoombaState, RoombaAct, O}
     sensor::T
-    mdp::RoombaMDP
+    mdp::RoombaMDP{SS, AS}
 end
 
 # observation models
@@ -162,18 +162,18 @@ DiscreteLidar(disc_points) = DiscreteLidar(Lidar().ray_stdev, disc_points)
 
 # Shorthands
 const RoombaModel = Union{RoombaMDP, RoombaPOMDP}
-const BumperPOMDP = RoombaPOMDP{Bumper, Bool}
-const LidarPOMDP = RoombaPOMDP{Lidar, Float64}
-const DiscreteLidarPOMDP = RoombaPOMDP{DiscreteLidar, Int}
+const BumperPOMDP{SS, AS} = RoombaPOMDP{SS, AS, Bumper, Bool}
+const LidarPOMDP{SS, AS} = RoombaPOMDP{SS, AS, Lidar, Float64}
+const DiscreteLidarPOMDP{SS, AS} = RoombaPOMDP{SS, AS, DiscreteLidar, Int}
 
 # access the mdp of a RoombaModel
-mdp(e::RoombaMDP) = e
-mdp(e::RoombaPOMDP) = e.mdp
+mdp(e::RoombaMDP) = e::RoombaMDP
+mdp(e::RoombaPOMDP) = e.mdp::RoombaMDP
 
 
 # RoombaPOMDP Constructor
-function RoombaPOMDP(sensor, mdp)
-    RoombaPOMDP{typeof(sensor), obstype(sensor)}(sensor, mdp)
+function RoombaPOMDP(sensor, mdp::RoombaMDP{SS,AS}) where {SS, AS}
+    RoombaPOMDP{SS, AS, typeof(sensor), obstype(sensor)}(sensor, mdp)
 end
 
 RoombaPOMDP(;sensor=Bumper(), mdp=RoombaMDP()) = RoombaPOMDP(sensor,mdp)
@@ -201,18 +201,23 @@ function get_goal_xy(m::RoombaModel)
 end
 
 # transition Roomba state given curent state and action
-function POMDPs.transition(m::RoombaModel,
-                           s::AbstractVector{Float64},
-                           a::AbstractVector{Float64})
+POMDPs.transition(m::RoombaPOMDP{SS}, s::RoombaState, a::RoombaAct) where SS = transition(m.mdp, s, a)
+POMDPs.transition(m::RoombaMDP{SS}, s::RoombaState, a::RoombaAct) where SS <: ContinuousRoombaStateSpace = Deterministic(get_next_state(m, s, a))
 
-    e = mdp(m)
+function POMDPs.transition(m::RoombaMDP{SS}, s::RoombaState, a::RoombaAct) where SS <: DiscreteRoombaStateSpace
+    # round the states to nearest grid point
+    si = stateindex(m, get_next_state(m, s, a))
+    return index_to_state(m, si)
+end
+
+function get_next_state(m::RoombaMDP, s::RoombaState, a::RoombaAct)
     v, om = a
-    v = clamp(v, 0.0, e.v_max)
-    om = clamp(om, -e.om_max, e.om_max)
+    v = clamp(v, 0.0, m.v_max)
+    om = clamp(om, -m.om_max, m.om_max)
 
     # propagate dynamics without wall considerations
     x, y, th, _ = s
-    dt = e.dt
+    dt = m.dt
 
     # dynamics assume robot rotates and then translates
     next_th = wrap_to_pi(th + om*dt)
@@ -221,24 +226,13 @@ function POMDPs.transition(m::RoombaModel,
     p0 = SVector(x, y)
     heading = SVector(cos(next_th), sin(next_th))
     des_step = v*dt
-    p1 = legal_translate(e.room, p0, heading, des_step)
+    p1 = legal_translate(m.room, p0, heading, des_step)
 
     # Determine whether goal state or stairs have been reached
-    next_status = 1.0*segment_contact(e.room.goal_segment,p1) - 1.0*segment_contact(e.room.stair_segment,p1)
+    next_status = 1.0*segment_contact(m.room.goal_segment,p1) - 1.0*segment_contact(m.room.stair_segment,p1)
+
     # define next state
-
-    sp = RoombaState(p1[1],p1[2], next_th, next_status)
-#    if next_status != 0
-#	    @show Int(next_status)
-#		@show p1
-#    end
-
-    if mdp(m).sspace isa DiscreteRoombaStateSpace
-        # round the states to nearest grid point
-        si = stateindex(m, sp)
-        sp = index_to_state(m, si)
-    end
-    return Deterministic(sp)
+    return RoombaState(p1[1],p1[2], next_th, next_status)
 end
 
 # enumerate all possible states in a DiscreteRoombaStateSpace
@@ -275,49 +269,43 @@ function POMDPs.stateindex(m::RoombaModel, s::RoombaState)
 end
 
 # map an index in a DiscreteRoombaStateSpace to the corresponding RoombaState
-function index_to_state(m::RoombaModel, si::Int)
-    if mdp(m).sspace isa DiscreteRoombaStateSpace
-        ss = mdp(m).sspace
-        lin = CartesianIndices((convert(Int, diff(ss.XLIMS)[1]/ss.x_step)+1,
-                            convert(Int, diff(ss.YLIMS)[1]/ss.y_step)+1,
-                            round(Int, 2*pi/ss.th_step)+1,
-                            3))
+index_to_state(m::RoombaPOMDP{SS}, si::Int) where SS <: DiscreteRoombaStateSpace = index_to_state(m.mdp, si)
 
-        xi,yi,thi,sti = Tuple(lin[si])
+function index_to_state(m::RoombaMDP{SS}, si::Int) where SS <: DiscreteRoombaStateSpace
+    ss = m.sspace
+    lin = CartesianIndices((convert(Int, diff(ss.XLIMS)[1]/ss.x_step)+1,
+                        convert(Int, diff(ss.YLIMS)[1]/ss.y_step)+1,
+                        round(Int, 2*pi/ss.th_step)+1,
+                        3))
 
-        x = ss.XLIMS[1] + (xi-1) * ss.x_step
-        y = ss.YLIMS[1] + (yi-1) * ss.y_step
-        th = -pi + (thi-1) * ss.th_step
-        st = sti - 2
+    xi,yi,thi,sti = Tuple(lin[si])
 
-        return RoombaState(x,y,th,st)
+    x = ss.XLIMS[1] + (xi-1) * ss.x_step
+    y = ss.YLIMS[1] + (yi-1) * ss.y_step
+    th = -pi + (thi-1) * ss.th_step
+    st = sti - 2
 
-    else
-        error("State-space must be DiscreteRoombaStateSpace.")
-    end
+    return RoombaState(x,y,th,st)
 end
 
 
 # defines reward function R(s,a,s')
-function POMDPs.reward(m::RoombaModel,
-                s::AbstractVector{Float64},
-                a::AbstractVector{Float64},
-                sp::AbstractVector{Float64})
-
+POMDPs.reward(m::RoombaPOMDP, s::RoombaState, a::RoombaAct, sp::RoombaState) = reward(m.mdp, s, a, sp)
+function POMDPs.reward(m::RoombaMDP, s::RoombaState, a::RoombaAct, sp::RoombaState)
     # penalty for each timestep elapsed
-    cum_reward = mdp(m).time_pen
+    cum_reward = m.time_pen
 
     # penalty for bumping into wall (not incurred for consecutive contacts)
 	#why it is mdp(m).room
-    previous_wall_contact = room_contact(mdp(m).room,s[1:2])
-    current_wall_contact = room_contact(mdp(m).room,sp)
+    previous_wall_contact = room_contact(m.room,Pos(s.x, s.y))
+    current_wall_contact = room_contact(m.room,Pos(sp.x, sp.y))
     if(!previous_wall_contact && current_wall_contact)
-        cum_reward += mdp(m).contact_pen
+        cum_reward += m.contact_pen
     end
 
     # terminal rewards
-    cum_reward += mdp(m).goal_reward*(sp.status == 1.0)
-    cum_reward += mdp(m).stairs_penalty*(sp.status == -1.0)
+    cum_reward += m.goal_reward*(sp.status == 1.0)
+    cum_reward += m.stairs_penalty*(sp.status == -1.0)
 
     return cum_reward
 end
@@ -329,7 +317,7 @@ POMDPs.isterminal(m::RoombaModel, s::AbstractVector{Float64}) = abs(s.status) > 
 function POMDPs.observation(m::BumperPOMDP,
                             a::AbstractVector{Float64},
                             sp::AbstractVector{Float64})
-    return Deterministic(room_contact(mdp(m).room, sp)) # in {0.0,1.0}
+    return Deterministic(room_contact(mdp(m).room, Pos(sp.x, sp.y))) # in {0.0,1.0}
 end
 
 POMDPs.observations(m::BumperPOMDP) = [false, true]
@@ -341,7 +329,7 @@ function POMDPs.observation(m::LidarPOMDP,
     x, y, th = sp
 
     # determine uncorrupted observation
-	rl = minimum(ray_length(seg, [x, y], [cos(th), sin(th)]) for seg in mdp(m).room.segments)
+	rl = minimum(ray_length(seg, Pos(x,y), Pos(cos(th), sin(th))) for seg in mdp(m).room.segments)
     # compute observation noise
     sigma = m.sensor.ray_stdev * max(rl, 0.01)
 
@@ -409,7 +397,7 @@ function render(ctx::CairoContext, m::RoombaModel, step)
         bp = step[:bp]
         if bp isa AbstractParticleBelief
             for p in particles(bp)
-                x, y = transform_coords(p[1:2])
+                x, y = transform_coords(Pos(p.x, p.y))
                 arc(ctx, x, y, radius, 0, 2*pi)
                 set_source_rgba(ctx, 0.6, 0.6, 1, 0.3)
                 fill(ctx)
@@ -421,14 +409,14 @@ function render(ctx::CairoContext, m::RoombaModel, step)
     render(env.room, ctx)
 
     # Find center of robot in frame and draw circle
-    x, y = transform_coords(state[1:2])
+    x, y = transform_coords(Pos(state.x, state.y))
     arc(ctx, x, y, radius, 0, 2*pi)
     set_source_rgb(ctx, 1, 0.6, 0.6)
     fill(ctx)
 
     # Draw line indicating orientation
     move_to(ctx, x, y)
-    end_point = [state[1] + ROBOT_W.val*cos(state[3])/2, state[2] + ROBOT_W.val*sin(state[3])/2]
+    end_point = Pos(state[1] + ROBOT_W.val*cos(state[3])/2, state[2] + ROBOT_W.val*sin(state[3])/2)
     end_x, end_y = transform_coords(end_point)
     line_to(ctx, end_x, end_y)
     set_source_rgb(ctx, 0, 0, 0)

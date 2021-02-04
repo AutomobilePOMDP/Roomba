@@ -48,7 +48,7 @@ end
 println("ToEnd test")
 # Define the policy to test
 mutable struct ToEnd <: Policy
-    ts::Int64 # to track the current time-step.
+    ts::Int # to track the current time-step.
 end
 
 # extract goal for heuristic controller

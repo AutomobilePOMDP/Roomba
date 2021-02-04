@@ -5,11 +5,11 @@
 mutable struct ROBOT_W_struct
     val::Float64 # robot width
 end
-DEFAULT_ROBOT_W = 1.0
-DEFAULT_R = DEFAULT_ROBOT_W / 2.
-ROBOT_W = ROBOT_W_struct(DEFAULT_ROBOT_W)
-MARGIN = 1e-9
-SQRT_2 = 1.4142
+const DEFAULT_ROBOT_W = 1.0
+const DEFAULT_R = DEFAULT_ROBOT_W / 2.
+const ROBOT_W = ROBOT_W_struct(DEFAULT_ROBOT_W)
+const ROOM_MARGIN = 1e-9
+const SQRT_2 = sqrt(2)
 
 function round_corners(sspace, corners)
 
@@ -31,6 +31,7 @@ mutable struct Room
     possegments::Array{LineSegment, 1}
     goal_wall::Int
     stair_wall::Int
+    contact_walls::Vector{Int}
     goal_segment::LineSegment  # Index of wall that leads to goal
     stair_segment::LineSegment # Index of wall that leads to stairs
     xl::Float64
@@ -60,6 +61,7 @@ mutable struct Room
             retval.goal_wall = 6
             retval.stair_wall = 4
         end
+        retval.contact_walls = Int[]
         retval.goal_segment = goal_wall_segment(retval.goal_wall,ROOM_W)
         retval.stair_segment = goal_wall_segment(retval.stair_wall,ROOM_W)
         #corners(start from the bottom left and is clockwidth)
@@ -99,31 +101,32 @@ function init_pos(r::Room, rng)
     end
     @assert "can not init position, recheck the room"
 end
-function in_room(r::Room, pos::AbstractVector{Float64})
-    if r.xl-MARGIN< pos[1] < r.xu+MARGIN &&
-        r.yl-MARGIN < pos[2] < r.yu+MARGIN &&
-        (r.tpoint[1]+MARGIN > pos[1]||r.tpoint[2]-MARGIN < pos[2])
+
+function in_room(r::Room, pos::Pos)
+    if r.xl-ROOM_MARGIN< pos[1] < r.xu+ROOM_MARGIN &&
+        r.yl-ROOM_MARGIN < pos[2] < r.yu+ROOM_MARGIN &&
+        (r.tpoint[1]+ROOM_MARGIN > pos[1]||r.tpoint[2]-ROOM_MARGIN < pos[2])
         return true
     end
 
     return false
 end
 # for determing
-function room_contact(r::Room,pos::AbstractVector{Float64})
+function room_contact(r::Room,pos::Pos)
     #if roomba contact any wall
-    if r.xl > pos[1] - MARGIN
+    if r.xl > pos[1] - ROOM_MARGIN
         return true
     end
-    if r.xu < pos[1] + MARGIN
+    if r.xu < pos[1] + ROOM_MARGIN
         return true
     end
-    if r.yl > pos[2] - MARGIN
+    if r.yl > pos[2] - ROOM_MARGIN
         return true
     end
-    if r.yu < pos[2] + MARGIN
+    if r.yu < pos[2] + ROOM_MARGIN
         return true
     end
-    if r.tpoint[2] > pos[2] - MARGIN && r.tpoint[1] < pos[1] + MARGIN
+    if r.tpoint[2] > pos[2] - ROOM_MARGIN && r.tpoint[1] < pos[1] + ROOM_MARGIN
         return true
     end
     return false
@@ -131,26 +134,26 @@ end
 # possible contact walls
 # pos1:start point
 # pos2:end point
-function collapse_detect(r::Room, pos1::AbstractVector{Float64},
-    pos2::AbstractVector{Float64})
-    contact_walls = []
-    if r.xl > pos2[1] - MARGIN
+function collapse_detect(r::Room, pos1::Pos, pos2::Pos)
+    contact_walls = r.contact_walls
+    empty!(contact_walls)
+    if r.xl > pos2[1] - ROOM_MARGIN
         push!(contact_walls,1)
     end
-    if r.xu < pos2[1] + MARGIN
+    if r.xu < pos2[1] + ROOM_MARGIN
         push!(contact_walls,3)
     end
-    if r.yl > pos2[2] + MARGIN
+    if r.yl > pos2[2] + ROOM_MARGIN
         push!(contact_walls,6)
     end
-    if r.yu < pos2[2] + MARGIN
+    if r.yu < pos2[2] + ROOM_MARGIN
         push!(contact_walls,2)
     end
-    if r.tpoint[1] < pos2[1] + MARGIN && r.tpoint[2] > pos2[2] - MARGIN
-        if r.tpoint[1] > pos1[1] - MARGIN
+    if r.tpoint[1] < pos2[1] + ROOM_MARGIN && r.tpoint[2] > pos2[2] - ROOM_MARGIN
+        if r.tpoint[1] > pos1[1] - ROOM_MARGIN
             push!(contact_walls,5)
         end
-        if r.tpoint[2] < pos1[2] + MARGIN
+        if r.tpoint[2] < pos1[2] + ROOM_MARGIN
             push!(contact_walls,4)
         end
     end
@@ -194,17 +197,17 @@ end
 
 # determines if pos (center of robot) is intersecting with a segment;should
 # replaced with calculating the distance between point and LineSegment
-function segment_contact(seg::LineSegment,pos::AbstractVector{Float64})
+function segment_contact(seg::LineSegment,pos::Pos)
     # vertical line
-    if abs(seg.p2[1]-seg.p1[1])<MARGIN
-        if abs(pos[1]-seg.p2[1])<MARGIN+DEFAULT_R&&
+    if abs(seg.p2[1]-seg.p1[1])<ROOM_MARGIN
+        if abs(pos[1]-seg.p2[1])<ROOM_MARGIN+DEFAULT_R&&
             pos[2]<max(seg.p2[2],seg.p1[2])&&
             pos[2]>min(seg.p2[2],seg.p1[2])
             return true
         end
         return false
         # horizonal line
-    elseif abs(pos[2]-seg.p2[2])<MARGIN+DEFAULT_R&&
+    elseif abs(pos[2]-seg.p2[2])<ROOM_MARGIN+DEFAULT_R&&
         pos[1]<max(seg.p2[1],seg.p1[1])&&
         pos[1]>min(seg.p2[1],seg.p1[1])
         return true
@@ -213,8 +216,7 @@ function segment_contact(seg::LineSegment,pos::AbstractVector{Float64})
 end
     # pos1:start point
     # pos2:end point
-function legal_translate(r::Room, pos::AbstractVector{Float64},
-     heading::AbstractVector{Float64}, des_step::Float64)
+function legal_translate(r::Room, pos::Pos, heading::Pos, des_step::Float64)
      pos1 = pos
      if des_step == 0
          return pos1
@@ -233,16 +235,7 @@ function legal_translate(r::Room, pos::AbstractVector{Float64},
     pos2 = pos1 + length_min*heading
     return pos2
 end
-# Sample from multinomial distribution
-# eventually th is should be replaced with categorical
-function multinomial_sample(p::AbstractVector{Float64}, rng::AbstractRNG)
-    rand_num = rand(rng)
-    for i = 1:length(p)
-        if rand_num < sum(p[1:i])
-            return i
-        end
-    end
-end
+
 # Render room based on segments
 function render(r::Room, ctx::CairoContext)
     for seg in r.segments

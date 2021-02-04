@@ -1,6 +1,6 @@
 name = "Roomba"
 uuid = "27451d18-47cd-4e6c-a8d6-4c3b695fab9f"
-repo = "https://github.com/AutomobilePOMDP/Roomba"
+repo = "https://github.com/LAMDA-POMDP/Roomba"
 version = "0.1.1"
 
 [deps]
