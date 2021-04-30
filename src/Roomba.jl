@@ -32,14 +32,11 @@ export
     wrap_to_pi,
     ContinuousRoombaStateSpace,
     DiscreteRoombaStateSpace,
-    render,
-    Running,
-    RunningSolver
+    render
 
 include("line_segment_utils.jl")
 include("env_room.jl")
 include("roomba_env.jl")
 include("filtering.jl")
-include("heuristics.jl")
 
 end
