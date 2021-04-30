@@ -52,7 +52,7 @@ returns:
 """
 function intersect_line_linesegment(p0::Pos, uvec::Pos, p1::Pos, p2::Pos)
     dx, dy = uvec
-    n = [-dy, dx]
+    n = Pos(-dy, dx)
     dprod1 = dot(n, p1-p0)
     dprod2 = dot(n, p2-p0)
 
@@ -113,9 +113,8 @@ returns:
 - `::Bool` that is true if pointing toward segment
 """
 function pointing_toward_segment(ls::LineSegment, p0::Pos, heading::Pos)
-    dp12 = ls.p2 - ls.p1
-    normalize!(dp12)
-    np12 = [-dp12[2], dp12[1]]
+    dp12 = normalize(ls.p2 - ls.p1)
+    np12 = Pos(-dp12[2], dp12[1])
 
     # ensure it points toward p0
     if dot(np12, p0 - ls.p1) < 0
@@ -224,9 +223,8 @@ function furthest_step(ls::LineSegment, p0::Pos, heading::Pos, R::Float64)
     end
 
     # heading along segment
-    dp12 = ls.p2 - ls.p1
-    normalize!(dp12)
-    np12 = [-dp12[2], dp12[1]]
+    dp12 = normalize(ls.p2 - ls.p1)
+    np12 = Pos(-dp12[2], dp12[1])
 
     # project sides out a robot radius
     p1l = ls.p1 - R*np12

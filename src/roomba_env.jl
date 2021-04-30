@@ -207,7 +207,7 @@ POMDPs.transition(m::RoombaMDP{SS}, s::RoombaState, a::RoombaAct) where SS <: Co
 function POMDPs.transition(m::RoombaMDP{SS}, s::RoombaState, a::RoombaAct) where SS <: DiscreteRoombaStateSpace
     # round the states to nearest grid point
     si = stateindex(m, get_next_state(m, s, a))
-    return index_to_state(m, si)
+    return Deterministic(index_to_state(m, si))
 end
 
 function get_next_state(m::RoombaMDP, s::RoombaState, a::RoombaAct)
